@@ -14,11 +14,14 @@ app.use(cors());
 app.use(bodyParser.json());
 
 // ✅ MongoDB Connect
-mongoose.connect(process.env.MONGO_URI)
-  .then(() => console.log("✅ MongoDB Connected"))
-  .catch((err) => console.log("❌ MongoDB Error:", err));
+mongoose.connect(process.env.MONGO_URI, {
+  useNewUrlParser: true,
+  useUnifiedTopology: true,
+})
+.then(() => console.log("✅ MongoDB Connected"))
+.catch((err) => console.error("❌ MongoDB Error:", err));
 
-// ✅ Root Route (Browser Access Message)
+// ✅ Root Route (Optional)
 app.get("/", (req, res) => {
   res.send("✅ NEXORA Server Run Successfully!");
 });
@@ -34,33 +37,33 @@ const UserSchema = new mongoose.Schema({
   dob: String,
   gender: String,
   region: String,
-  createdAt: { type: Date, default: Date.now }
+  createdAt: { type: Date, default: Date.now },
 });
 const User = mongoose.model("User", UserSchema);
 
-// ✅ OTP Schema
+// ✅ OTP Schema (expires in 5 mins)
 const OTPSchema = new mongoose.Schema({
   email: String,
   code: String,
-  createdAt: { type: Date, default: Date.now, expires: 300 } // 5 mins
+  createdAt: { type: Date, default: Date.now, expires: 300 },
 });
 const OTP = mongoose.model("OTP", OTPSchema);
 
-// ✅ Nodemailer
+// ✅ Email Setup
 const transporter = nodemailer.createTransport({
   service: "gmail",
   auth: {
     user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS
-  }
+    pass: process.env.EMAIL_PASS,
+  },
 });
 
-// ✅ 6-digit Code Generator
+// ✅ Generate 6-digit OTP
 function generateOTP() {
   return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
-// 🔸 API: Sign Up
+// ✅ Sign Up API
 app.post("/api/signup", async (req, res) => {
   const {
     firstName, lastName, fullName,
@@ -87,7 +90,7 @@ app.post("/api/signup", async (req, res) => {
       password,
       dob,
       gender,
-      region
+      region,
     });
     await user.save();
 
@@ -98,7 +101,7 @@ app.post("/api/signup", async (req, res) => {
       from: process.env.EMAIL_USER,
       to: email,
       subject: "NEXORA Email Verification Code",
-      text: `Your verification code is: ${code}`
+      text: `Your verification code is: ${code}`,
     });
 
     res.status(201).json({ message: "User registered. OTP sent." });
@@ -108,35 +111,40 @@ app.post("/api/signup", async (req, res) => {
   }
 });
 
-// 🔹 API: Send New Code (Resend)
+// ✅ Resend Code API
 app.post("/api/send-code", async (req, res) => {
   const { email } = req.body;
-  if (!email) return res.status(400).json({ message: "Email is required" });
 
-  const code = generateOTP();
+  if (!email) {
+    return res.status(400).json({ message: "Email is required" });
+  }
 
   try {
-    await OTP.deleteMany({ email }); // delete old codes
+    await OTP.deleteMany({ email }); // delete previous codes
+    const code = generateOTP();
     await OTP.create({ email, code });
 
     await transporter.sendMail({
       from: process.env.EMAIL_USER,
       to: email,
       subject: "NEXORA Email Verification Code",
-      text: `Your verification code is: ${code}`
+      text: `Your verification code is: ${code}`,
     });
 
     res.status(200).json({ message: "OTP sent successfully" });
   } catch (err) {
-    console.error("❌ Resend Error:", err);
-    res.status(500).json({ message: "Failed to send OTP" });
+    console.error("❌ Resend OTP Error:", err);
+    res.status(500).json({ message: "Failed to send OTP", error: err.message });
   }
 });
 
-// 🔹 API: Verify Code
+// ✅ Verify Code API
 app.post("/api/verify-code", async (req, res) => {
   const { email, code } = req.body;
-  if (!email || !code) return res.status(400).json({ message: "Email and code required" });
+
+  if (!email || !code) {
+    return res.status(400).json({ message: "Email and code required" });
+  }
 
   try {
     const entry = await OTP.findOne({ email, code });
@@ -145,6 +153,7 @@ app.post("/api/verify-code", async (req, res) => {
     }
 
     await OTP.deleteOne({ _id: entry._id });
+
     res.status(200).json({ message: "Email verified successfully" });
   } catch (err) {
     console.error("❌ Verification Error:", err);
@@ -152,7 +161,35 @@ app.post("/api/verify-code", async (req, res) => {
   }
 });
 
-// ✅ Start Server
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on http://localhost:${PORT}`);
+// ✅ Sign In API
+app.post("/api/signin", async (req, res) => {
+  const { username, password } = req.body;
+
+  if (!username || !password) {
+    return res.status(400).json({ error: "Username and password required" });
+  }
+
+  try {
+    const user = await User.findOne({
+      $or: [{ email: username }, { username }, { phone: username }],
+    });
+
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    if (user.password !== password) {
+      return res.status(401).json({ error: "Incorrect password" });
+    }
+
+    res.status(200).json({ message: "Sign IN successful", user });
+  } catch (err) {
+    console.error("❌ SignIn Error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ✅ Start Server (Fixed for Render or any cloud host)
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 Server running on port ${PORT}`);
 });
